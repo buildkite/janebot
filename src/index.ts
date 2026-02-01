@@ -27,7 +27,7 @@ function cleanSlackMessage(text: string): string {
 }
 import * as log from "./logger.js"
 import * as sessions from "./sessions.js"
-import { executeInSprite } from "./sprite-executor.js"
+import { executeInSprite, type GeneratedFile } from "./sprite-executor.js"
 import { SpritesClient } from "./sprites.js"
 import * as spritePool from "./sprite-pool.js"
 
@@ -139,6 +139,45 @@ When using find_thread or read_thread:
   return soulPrompt ? `${soulPrompt}\n${privacyContext}` : privacyContext
 }
 
+/**
+ * Upload generated files from a Sprite to a Slack channel.
+ * Downloads files from the Sprite and uploads them to Slack.
+ */
+async function uploadGeneratedFiles(
+  client: typeof app.client,
+  spriteName: string,
+  files: GeneratedFile[],
+  channelId: string,
+  threadTs: string
+): Promise<void> {
+  if (files.length === 0) return
+
+  const token = config.spritesToken
+  if (!token) return
+
+  const spritesClient = new SpritesClient(token)
+
+  for (const file of files) {
+    try {
+      log.info("Downloading file from sprite", { sprite: spriteName, path: file.path })
+      const fileData = await spritesClient.downloadFile(spriteName, file.path)
+
+      log.info("Uploading file to Slack", { filename: file.filename, size: fileData.length })
+
+      await client.filesUploadV2({
+        channel_id: channelId,
+        thread_ts: threadTs,
+        file: fileData,
+        filename: file.filename,
+      })
+
+      log.info("File uploaded to Slack", { filename: file.filename })
+    } catch (error) {
+      log.error("Failed to upload file", { file: file.path, error })
+    }
+  }
+}
+
 // Tools enabled for local execution
 const LOCAL_ENABLED_TOOLS = [
   "Bash",
@@ -170,7 +209,7 @@ async function runAmpInSprite(
   userId: string,
   channelId: string,
   threadTs: string
-): Promise<{ content: string; threadId: string | undefined }> {
+): Promise<{ content: string; threadId: string | undefined; generatedFiles: GeneratedFile[]; spriteName: string }> {
   const result = await executeInSprite({
     channelId,
     threadTs,
@@ -178,7 +217,12 @@ async function runAmpInSprite(
     prompt,
     systemPrompt: buildSystemPrompt(userId),
   })
-  return { content: result.content, threadId: result.threadId }
+  return {
+    content: result.content,
+    threadId: result.threadId,
+    generatedFiles: result.generatedFiles,
+    spriteName: result.spriteName,
+  }
 }
 
 /**
@@ -226,6 +270,13 @@ async function runAmpLocal(
   return { content, threadId }
 }
 
+interface AmpExecutionResult {
+  content: string
+  threadId: string | undefined
+  generatedFiles?: GeneratedFile[]
+  spriteName?: string
+}
+
 /**
  * Execute Amp with appropriate isolation based on configuration.
  */
@@ -235,7 +286,7 @@ async function runAmp(
   userId: string,
   channelId: string,
   threadTs: string
-): Promise<{ content: string; threadId: string | undefined }> {
+): Promise<AmpExecutionResult> {
   // Use Sprites sandbox if configured
   if (config.spritesToken) {
     return runAmpInSprite(prompt, userId, channelId, threadTs)
@@ -333,6 +384,11 @@ app.event("app_mention", async ({ event, client, say }) => {
     // Store thread mapping for future messages (handled by sprite-executor for Sprites mode)
     if (result.threadId && config.allowLocalExecution && !config.spritesToken) {
       sessions.set(channelId, slackThreadTs, result.threadId, userId)
+    }
+
+    // Upload any generated files (images from painter tool, etc.)
+    if (result.generatedFiles?.length && result.spriteName) {
+      await uploadGeneratedFiles(client, result.spriteName, result.generatedFiles, channelId, slackThreadTs)
     }
 
     // Send response (chunked if needed for Slack's 4000 char limit)
@@ -461,6 +517,11 @@ app.event("message", async ({ event, client, say }) => {
     // Store thread mapping for future messages (handled by sprite-executor for Sprites mode)
     if (result.threadId && config.allowLocalExecution && !config.spritesToken) {
       sessions.set(channelId, slackThreadTs, result.threadId, userId)
+    }
+
+    // Upload any generated files (images from painter tool, etc.)
+    if (result.generatedFiles?.length && result.spriteName) {
+      await uploadGeneratedFiles(client, result.spriteName, result.generatedFiles, channelId, slackThreadTs)
     }
 
     const content = result.content || "Done."

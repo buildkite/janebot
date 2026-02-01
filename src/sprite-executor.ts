@@ -15,6 +15,9 @@ import * as log from "./logger.js"
 import * as sessions from "./sessions.js"
 import * as pool from "./sprite-pool.js"
 
+// Enable debug logging with DEBUG_AMP_OUTPUT=1
+const DEBUG_AMP_OUTPUT = process.env.DEBUG_AMP_OUTPUT === "1"
+
 // Cache of sprites that have amp installed (in-memory, rebuilt on restart)
 const ampInstalledSprites = new Set<string>()
 
@@ -74,38 +77,127 @@ export interface SpriteExecutorOptions {
   systemPrompt?: string
 }
 
+export interface GeneratedFile {
+  path: string
+  filename: string
+}
+
 export interface SpriteExecutorResult {
   content: string
   threadId: string | undefined
   spriteName: string
+  generatedFiles: GeneratedFile[]
 }
 
 /**
- * Parse amp --stream-json output to extract session_id and result.
+ * Parse amp --stream-json output to extract session_id, result, and generated files.
  */
 function parseAmpOutput(stdout: string): {
   threadId: string | undefined
   content: string
+  generatedFiles: GeneratedFile[]
 } {
+  if (DEBUG_AMP_OUTPUT) {
+    log.info("Raw amp stdout", { length: stdout.length, preview: stdout.slice(0, 2000) })
+  }
+
   let threadId: string | undefined
   let content = ""
   let errorMsg: string | undefined
+  const generatedFiles: GeneratedFile[] = []
 
   const lines = stdout.split("\n").filter((line) => line.trim())
 
   for (const line of lines) {
     try {
-      const msg: AmpStreamMessage = JSON.parse(line)
+      const msg = JSON.parse(line) as Record<string, unknown>
 
       if (msg.session_id) {
-        threadId = msg.session_id
+        threadId = msg.session_id as string
       }
 
       if (msg.type === "result") {
         if (msg.subtype === "success" && msg.result) {
-          content = msg.result
+          content = msg.result as string
         } else if (msg.is_error && msg.error) {
-          errorMsg = msg.error
+          errorMsg = msg.error as string
+        }
+      }
+
+      // Look for tool_use blocks with painter tool calls that have savePath
+      if (msg.type === "assistant") {
+        const message = msg.message as Record<string, unknown> | undefined
+        const messageContent = message?.content as Array<Record<string, unknown>> | undefined
+        if (messageContent) {
+          for (const block of messageContent) {
+            // Check for painter tool_use with savePath argument
+            if (block.type === "tool_use" && block.name === "painter") {
+              const input = block.input as Record<string, unknown> | undefined
+              if (input?.savePath) {
+                const filePath = String(input.savePath).replace(/^file:\/\//, "")
+                const filename = filePath.split("/").pop() ?? "generated-image.png"
+                if (!generatedFiles.some(f => f.path === filePath)) {
+                  generatedFiles.push({ path: filePath, filename })
+                  if (DEBUG_AMP_OUTPUT) {
+                    log.info("Found painter tool_use with savePath", { filePath })
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Look for tool_result blocks that contain savedPath (from painter tool)
+      if (msg.type === "user") {
+        const message = msg.message as Record<string, unknown> | undefined
+        const messageContent = message?.content as Array<Record<string, unknown>> | undefined
+        if (messageContent) {
+          for (const block of messageContent) {
+            if (block.type === "tool_result") {
+              // The content can be a JSON array with objects containing savedPath
+              const blockContent = block.content
+              const contentArray = Array.isArray(blockContent) ? blockContent : [blockContent]
+              
+              if (DEBUG_AMP_OUTPUT) {
+                log.info("Found tool_result", { contentType: typeof blockContent, isArray: Array.isArray(blockContent) })
+              }
+              
+              for (const item of contentArray) {
+                // Check if item has savedPath (painter tool result)
+                if (item && typeof item === "object" && !Array.isArray(item)) {
+                  const itemObj = item as Record<string, unknown>
+                  if (itemObj.savedPath) {
+                    const filePath = String(itemObj.savedPath).replace(/^file:\/\//, "")
+                    const filename = filePath.split("/").pop() ?? "generated-image.png"
+                    if (!generatedFiles.some(f => f.path === filePath)) {
+                      generatedFiles.push({ path: filePath, filename })
+                      if (DEBUG_AMP_OUTPUT) {
+                        log.info("Found savedPath in tool_result", { filePath })
+                      }
+                    }
+                  }
+                }
+                // Also check for string content with paths
+                if (typeof item === "string") {
+                  const patterns = [
+                    /(?:saved|generated|created|wrote|output)(?:\s+(?:to|at|in))?\s+([^\s]+\.(png|jpg|jpeg|gif|webp))/gi,
+                    /(\/[^\s]+\.(png|jpg|jpeg|gif|webp))/gi,
+                  ]
+                  for (const pattern of patterns) {
+                    let match
+                    while ((match = pattern.exec(item)) !== null) {
+                      const filePath = match[1].replace(/^file:\/\//, "")
+                      const filename = filePath.split("/").pop() ?? "generated-image.png"
+                      if (!generatedFiles.some(f => f.path === filePath)) {
+                        generatedFiles.push({ path: filePath, filename })
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     } catch {
@@ -117,7 +209,7 @@ function parseAmpOutput(stdout: string): {
     throw new Error(errorMsg)
   }
 
-  return { threadId, content }
+  return { threadId, content, generatedFiles }
 }
 
 /**
@@ -163,14 +255,17 @@ export async function executeInSprite(
   // Ensure amp is installed (no-op if already installed or from pool)
   await ensureAmpInstalled(client, spriteName)
 
-  // Write system prompt to file if provided (amp CLI reads from file)
-  const systemPromptFile = "/tmp/system-prompt.md"
+  // Write settings file with system prompt if provided (same pattern as SDK)
+  const settingsFile = "/tmp/amp-settings.json"
   if (options.systemPrompt) {
+    const settings = {
+      "amp.systemPrompt": options.systemPrompt,
+    }
     await client.exec(spriteName, [
       "bash",
       "-c",
-      `cat > ${systemPromptFile}`,
-    ], { stdin: options.systemPrompt })
+      `cat > ${settingsFile}`,
+    ], { stdin: JSON.stringify(settings, null, 2) })
   }
 
   // Build CLI args: amp [threads continue <id>] --execute --stream-json [options]
@@ -186,7 +281,7 @@ export async function executeInSprite(
   args.push("--log-level", "warn")
 
   if (options.systemPrompt) {
-    args.push("--system-prompt-file", systemPromptFile)
+    args.push("--settings-file", settingsFile)
   }
 
   // Environment for amp
@@ -220,8 +315,21 @@ export async function executeInSprite(
     timeoutMs: 300000, // 5 minutes
   })
 
+  if (DEBUG_AMP_OUTPUT) {
+    log.info("Amp exec result", {
+      exitCode: result.exitCode,
+      stdoutLen: result.stdout.length,
+      stderrLen: result.stderr.length,
+      stderrPreview: result.stderr.slice(0, 500),
+    })
+  }
+
   // Parse JSON output
-  const { threadId, content } = parseAmpOutput(result.stdout)
+  const { threadId, content, generatedFiles } = parseAmpOutput(result.stdout)
+
+  if (generatedFiles.length > 0) {
+    log.info("Found generated files", { count: generatedFiles.length, files: generatedFiles })
+  }
 
   // Store session for thread continuity
   if (threadId) {
@@ -242,5 +350,6 @@ export async function executeInSprite(
     content: content || "Done.",
     threadId,
     spriteName,
+    generatedFiles,
   }
 }
