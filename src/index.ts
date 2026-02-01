@@ -12,6 +12,7 @@ import {
 import { config, isUserAllowed, isChannelAllowed } from "./config.js"
 import { debounce, cancel } from "./debouncer.js"
 import { markdownToSlack } from "md-to-slack"
+import * as log from "./logger.js"
 
 // Load SOUL.md for Jane's personality
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -20,7 +21,7 @@ let soulPrompt = ""
 try {
   soulPrompt = readFileSync(soulPath, "utf-8")
 } catch {
-  console.warn("SOUL.md not found, running without personality")
+  // SOUL.md is optional
 }
 
 // Session manager: maps Slack thread_ts → Amp thread ID
@@ -55,7 +56,6 @@ function formatErrorForUser(error: unknown): string {
   }
 
   // Generic fallback - don't expose raw error details
-  console.error("Unhandled error type:", message)
   return "Something went wrong. Please try again."
 }
 
@@ -120,11 +120,11 @@ app.event("app_mention", async ({ event, client, say }) => {
 
   // Authorization check
   if (!isUserAllowed(userId)) {
-    console.log(`Unauthorized user: ${userId}`)
+    log.warn("Unauthorized user", { userId })
     return
   }
   if (!isChannelAllowed(channelId)) {
-    console.log(`Unauthorized channel: ${channelId}`)
+    log.warn("Unauthorized channel", { channelId })
     return
   }
 
@@ -158,11 +158,15 @@ app.event("app_mention", async ({ event, client, say }) => {
     })
     .catch(() => {})
 
+  const startTime = Date.now()
+
   try {
     inFlight.add(sessionKey)
 
     // Wait for debounce to collect any rapid follow-up messages
     const prompt = await debounce(debounceKey, rawText)
+
+    log.request("mention", userId, channelId, prompt)
 
     const existingThreadId = sessions.get(sessionKey)
 
@@ -179,6 +183,8 @@ app.event("app_mention", async ({ event, client, say }) => {
       result.content || "I completed the task but have no response to share."
     await sendChunkedResponse(say, markdownToSlack(content), slackThreadTs)
 
+    log.response("mention", userId, Date.now() - startTime, true)
+
     // Mark as complete
     await client.reactions
       .add({
@@ -188,7 +194,8 @@ app.event("app_mention", async ({ event, client, say }) => {
       })
       .catch(() => {})
   } catch (error) {
-    console.error("Error processing message:", error)
+    log.error("Error processing mention", error)
+    log.response("mention", userId, Date.now() - startTime, false)
     cancel(debounceKey)
 
     await say({
@@ -237,7 +244,7 @@ app.event("message", async ({ event, client, say }) => {
 
   // Authorization check
   if (!isUserAllowed(userId)) {
-    console.log(`Unauthorized DM user: ${userId}`)
+    log.warn("Unauthorized DM user", { userId })
     return
   }
 
@@ -265,10 +272,15 @@ app.event("message", async ({ event, client, say }) => {
     })
     .catch(() => {})
 
+  const startTime = Date.now()
+
   try {
     inFlight.add(sessionKey)
 
     const prompt = await debounce(debounceKey, rawText)
+
+    log.request("dm", userId, channelId, prompt)
+
     const existingThreadId = sessions.get(sessionKey)
 
     const result = await runAmp(prompt, existingThreadId)
@@ -280,6 +292,8 @@ app.event("message", async ({ event, client, say }) => {
     const content = result.content || "Done."
     await sendChunkedResponse(say, markdownToSlack(content), slackThreadTs)
 
+    log.response("dm", userId, Date.now() - startTime, true)
+
     await client.reactions
       .add({
         channel: channelId,
@@ -288,7 +302,8 @@ app.event("message", async ({ event, client, say }) => {
       })
       .catch(() => {})
   } catch (error) {
-    console.error("Error processing DM:", error)
+    log.error("Error processing DM", error)
+    log.response("dm", userId, Date.now() - startTime, false)
     cancel(debounceKey)
 
     await say({
@@ -361,19 +376,12 @@ async function sendChunkedResponse(
 // Start the app
 async function main() {
   await app.start()
-  console.log("⚡️ janebot is running!")
-  console.log(`   Workspace: ${config.workspaceDir}`)
-  console.log(`   Agent mode: ${config.agentMode}`)
-  console.log(`   Debounce: ${config.debounceMs}ms`)
-  if (config.allowedUserIds.length > 0) {
-    console.log(`   Allowed users: ${config.allowedUserIds.length}`)
-  }
-  if (config.allowedChannelIds.length > 0) {
-    console.log(`   Allowed channels: ${config.allowedChannelIds.length}`)
-  }
-  if (Object.keys(config.mcpServers).length > 0) {
-    console.log(`   MCP servers: ${Object.keys(config.mcpServers).join(", ")}`)
-  }
+  log.startup({
+    workspace: config.workspaceDir,
+    mode: config.agentMode,
+    debounce: config.debounceMs,
+    hasSoul: !!soulPrompt,
+  })
 }
 
-main().catch(console.error)
+main().catch((err) => log.error("Startup failed", err))
