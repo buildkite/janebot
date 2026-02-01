@@ -185,7 +185,17 @@ function parseAmpOutput(stdout: string): {
                     }
                   }
                   
-                  if (!generatedFiles.some(f => f.path === filePath)) {
+                  // Update existing entry with data, or add new entry
+                  const existing = generatedFiles.find(f => f.path === filePath)
+                  if (existing) {
+                    // tool_use added entry without data, now we have the actual image data
+                    if (imageData && !existing.data) {
+                      existing.data = imageData
+                      if (DEBUG_AMP_OUTPUT) {
+                        log.info("Updated image with data", { filePath, dataSize: imageData.length })
+                      }
+                    }
+                  } else {
                     generatedFiles.push({ path: filePath, filename, data: imageData })
                     if (DEBUG_AMP_OUTPUT) {
                       log.info("Found image", { filePath, hasData: !!imageData, dataSize: imageData?.length })
