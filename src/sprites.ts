@@ -172,6 +172,45 @@ export class SpritesClient {
   async exec(
     name: string,
     command: string[],
+    options: { env?: Record<string, string>; dir?: string; stdin?: string; timeoutMs?: number; maxRetries?: number } = {}
+  ): Promise<ExecResult> {
+    const maxRetries = options.maxRetries ?? 3
+    let lastError: Error | undefined
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.execOnce(name, command, options)
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err))
+        
+        // Only retry on transient 500 errors
+        const is500 = lastError.message.includes("500") || lastError.message.includes("Unexpected server response")
+        if (!is500 || attempt >= maxRetries) {
+          throw lastError
+        }
+
+        // Exponential backoff: 1s, 2s, 4s...
+        const delayMs = Math.pow(2, attempt - 1) * 1000
+        log.info("Retrying exec after transient error", { 
+          sprite: name, 
+          attempt, 
+          maxRetries, 
+          delayMs,
+          error: lastError.message 
+        })
+        await new Promise(resolve => setTimeout(resolve, delayMs))
+      }
+    }
+
+    throw lastError ?? new Error("exec failed")
+  }
+
+  /**
+   * Internal: single exec attempt via WebSocket.
+   */
+  private async execOnce(
+    name: string,
+    command: string[],
     options: { env?: Record<string, string>; dir?: string; stdin?: string; timeoutMs?: number } = {}
   ): Promise<ExecResult> {
     const params = new URLSearchParams()
@@ -288,7 +327,9 @@ export class SpritesClient {
         if (!resolved) {
           resolved = true
           clearTimeout(timeout)
-          reject(new Error(`Sprites WebSocket error: ${err.message}`))
+          // Include sprite name and URL context for debugging
+          const errMsg = err.message || String(err)
+          reject(new Error(`Sprites WebSocket error for ${name}: ${errMsg}`))
         }
       })
     })
