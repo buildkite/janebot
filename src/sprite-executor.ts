@@ -276,9 +276,7 @@ export async function executeInSprite(
     } else {
       log.warn("Session sprite no longer exists, will create new one", { sprite: existingSession.spriteName })
       spriteName = "" // fall through below
-      // Clear session — the Amp thread was in the dead sprite, can't continue it
       existingSession.spriteName = undefined
-      existingSession.ampThreadId = ""
     }
   }
 
