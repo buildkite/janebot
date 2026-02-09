@@ -59,28 +59,59 @@ export class SpritesClient {
     path: string,
     body?: unknown
   ): Promise<T> {
-    const url = `${this.baseUrl}${path}`
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.token}`,
-      "Content-Type": "application/json",
+    const maxRetries = 3
+    let lastError: Error | undefined
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const url = `${this.baseUrl}${path}`
+        const headers: Record<string, string> = {
+          Authorization: `Bearer ${this.token}`,
+          "Content-Type": "application/json",
+        }
+
+        const response = await fetch(url, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+        })
+
+        if (!response.ok) {
+          const text = await response.text()
+          const status = response.status
+          const isRetryable = status === 401 || status === 429 || status >= 500
+          if (isRetryable && attempt < maxRetries) {
+            const delayMs = Math.pow(2, attempt - 1) * 1000
+            log.info("Retrying request after transient error", {
+              method, path, status, attempt, maxRetries, delayMs,
+            })
+            await new Promise(resolve => setTimeout(resolve, delayMs))
+            continue
+          }
+          throw new Error(`Sprites API error ${status}: ${text}`)
+        }
+
+        if (response.status === 204) {
+          return undefined as T
+        }
+
+        return response.json() as Promise<T>
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err))
+        const isNetworkError = lastError.message.includes("fetch failed") || lastError.message.includes("ECONNREFUSED")
+        if (isNetworkError && attempt < maxRetries) {
+          const delayMs = Math.pow(2, attempt - 1) * 1000
+          log.info("Retrying request after network error", {
+            method, path, attempt, maxRetries, delayMs, error: lastError.message,
+          })
+          await new Promise(resolve => setTimeout(resolve, delayMs))
+          continue
+        }
+        throw lastError
+      }
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    })
-
-    if (!response.ok) {
-      const text = await response.text()
-      throw new Error(`Sprites API error ${response.status}: ${text}`)
-    }
-
-    if (response.status === 204) {
-      return undefined as T
-    }
-
-    return response.json() as Promise<T>
+    throw lastError ?? new Error("request failed")
   }
 
   /**
