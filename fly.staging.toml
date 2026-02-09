@@ -1,9 +1,4 @@
-# fly.toml app configuration file generated for janebot on 2026-02-01T12:16:21+11:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'buildkite-janebot'
+app = 'janebot-staging'
 primary_region = 'syd'
 
 [build]
@@ -15,7 +10,7 @@ primary_region = 'syd'
   SESSIONS_FILE = '/data/sessions.json'
 
 [mounts]
-  source = 'janebot_data'
+  source = 'janebot_staging_data'
   destination = '/data'
 
 [[vm]]

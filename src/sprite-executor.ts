@@ -265,14 +265,24 @@ export async function executeInSprite(
 
   // Check if this thread already has a sprite (from session or pool)
   const existingSession = sessions.get(options.channelId, options.threadTs)
-  let spriteName: string
+  let spriteName = ""
 
   if (existingSession?.spriteName) {
-    // Reuse existing sprite for this thread
-    spriteName = existingSession.spriteName
-    const sprite = await client.get(spriteName)
-    log.info("Using existing sprite", { sprite: spriteName, status: sprite?.status ?? "unknown" })
-  } else {
+    // Reuse existing sprite for this thread (if it still exists)
+    const sprite = await client.get(existingSession.spriteName)
+    if (sprite) {
+      spriteName = existingSession.spriteName
+      log.info("Using existing sprite", { sprite: spriteName, status: sprite.status })
+    } else {
+      log.warn("Session sprite no longer exists, will create new one", { sprite: existingSession.spriteName })
+      spriteName = "" // fall through below
+      // Clear session — the Amp thread was in the dead sprite, can't continue it
+      existingSession.spriteName = undefined
+      existingSession.ampThreadId = ""
+    }
+  }
+
+  if (!spriteName) {
     // Try to claim a pre-warmed sprite from the pool
     const poolSprite = pool.claimSprite(threadKey)
 
