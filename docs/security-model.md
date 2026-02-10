@@ -42,7 +42,7 @@ Each request gets a clean filesystem via checkpoint restore. No state persists b
 |---------------|------------|
 | Filesystem access across requests | Checkpoint restore wipes state between requests |
 | Prompt injection to bypass rules | Defence in depth via system prompt |
-| Network exfiltration | Network policy restricts egress to LLM APIs only |
+| Network exfiltration | Network policy restricts egress to allowlisted domains |
 
 ### Tool Risks
 
