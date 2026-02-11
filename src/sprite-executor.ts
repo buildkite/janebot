@@ -215,14 +215,20 @@ export async function executeInSprite(
         "gh", "auth", "login", "--with-token",
       ], { env, stdin: githubToken, timeoutMs: 30000 })
       if (config.gitAuthorName) {
-        await spritesClient.exec(spriteName, [
+        const nameResult = await spritesClient.exec(spriteName, [
           "git", "config", "--global", "user.name", config.gitAuthorName,
         ], { timeoutMs: 10000 })
+        if (nameResult.exitCode !== 0) {
+          log.warn("Failed to set git user.name", { exitCode: nameResult.exitCode, stderr: nameResult.stderr })
+        }
       }
       if (config.gitAuthorEmail) {
-        await spritesClient.exec(spriteName, [
+        const emailResult = await spritesClient.exec(spriteName, [
           "git", "config", "--global", "user.email", config.gitAuthorEmail,
         ], { timeoutMs: 10000 })
+        if (emailResult.exitCode !== 0) {
+          log.warn("Failed to set git user.email", { exitCode: emailResult.exitCode, stderr: emailResult.stderr })
+        }
       }
       log.info("GitHub CLI and git identity configured in sprite", { sprite: spriteName })
     }
