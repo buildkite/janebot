@@ -206,9 +206,8 @@ export async function executeInSprite(
     if (githubToken) {
       env.GH_TOKEN = githubToken
       await spritesClient.exec(spriteName, [
-        "bash", "-c",
-        "echo $GH_TOKEN | gh auth login --with-token",
-      ], { env, timeoutMs: 30000 })
+        "gh", "auth", "login", "--with-token",
+      ], { env, stdin: githubToken, timeoutMs: 30000 })
       log.info("GitHub CLI authenticated in sprite", { sprite: spriteName })
     }
 

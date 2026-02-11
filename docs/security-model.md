@@ -54,8 +54,8 @@ The GitHub App is configured with minimal permissions:
 
 | Permission | Level | Why |
 |------------|-------|-----|
-| Contents | Read & write | Push feature branches |
-| Pull requests | Read & write | Create and update PRs |
+| Contents | Read & write | Clone repos, push feature branches |
+| Pull requests | Read & write | Create, update, and view PRs |
 | Metadata | Read | Required by GitHub |
 
 The app does NOT have administration, merge queue, or branch protection bypass permissions.

@@ -70,7 +70,6 @@ async function initRunner(index: number): Promise<void> {
 async function buildRunner(name: string): Promise<void> {
   log.info("Building runner", { name })
   await client.create(name)
-  await client.setNetworkPolicy(name, NETWORK_POLICY)
 
   await client.exec(name, [
     "bash", "-c",
@@ -93,6 +92,7 @@ async function buildRunner(name: string): Promise<void> {
   const ghVer = await client.exec(name, ["gh", "--version"], { timeoutMs: 15000 })
   log.info("Runner gh installed", { name, version: ghVer.stdout.split("\n")[0]?.trim() })
 
+  await client.setNetworkPolicy(name, NETWORK_POLICY)
   await client.createCheckpoint(name, CLEAN_CHECKPOINT)
   log.info("Runner ready", { name })
 }
