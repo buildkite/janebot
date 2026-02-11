@@ -14,3 +14,22 @@ steps:
 
   - label: ":package: Build"
     command: mise exec node -- pnpm install && mise exec node -- pnpm build
+
+  - wait
+
+  - block: ":rocket: Deploy to Staging"
+    if: build.pull_request.id != null
+
+  - label: ":fly: Deploy Staging"
+    if: build.pull_request.id != null
+    command: flyctl deploy --config fly.staging.toml --remote-only
+    secrets:
+      - FLY_API_TOKEN
+
+  - wait
+
+  - label: ":fly: Deploy Production"
+    branches: main
+    command: flyctl deploy --config fly.toml --remote-only
+    secrets:
+      - FLY_API_TOKEN
