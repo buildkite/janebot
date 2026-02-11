@@ -187,6 +187,12 @@ export class SpritesClient {
       // CDN/infrastructure that amp might use
       { action: "allow", domain: "*.cloudflare.com" },
       { action: "allow", domain: "*.googleapis.com" },
+      // GitHub API and web access
+      { action: "allow", domain: "github.com" },
+      { action: "allow", domain: "*.github.com" },
+      { action: "allow", domain: "api.github.com" },
+      { action: "allow", domain: "raw.githubusercontent.com" },
+      { action: "allow", domain: "objects.githubusercontent.com" },
     ])
 
     return sprite

@@ -2,6 +2,7 @@ import { SpritesClient } from "./sprites.js"
 import { config } from "./config.js"
 import * as log from "./logger.js"
 import { acquireRunner } from "./sprite-runners.js"
+import { getGitHubToken } from "./github-app.js"
 
 const DEBUG_AMP_OUTPUT = process.env.DEBUG_AMP_OUTPUT === "1"
 
@@ -200,6 +201,20 @@ export async function executeInSprite(
       throw new Error("AMP_API_KEY environment variable not set")
     }
     env.AMP_API_KEY = ampApiKey
+
+    let githubToken: string | undefined
+    try {
+      githubToken = await getGitHubToken()
+    } catch (err) {
+      log.warn("Failed to mint GitHub token, continuing without GitHub access", { error: err })
+    }
+    if (githubToken) {
+      env.GH_TOKEN = githubToken
+      await spritesClient.exec(spriteName, [
+        "gh", "auth", "login", "--with-token",
+      ], { env, stdin: githubToken, timeoutMs: 30000 })
+      log.info("GitHub CLI authenticated in sprite", { sprite: spriteName })
+    }
 
     log.info("Executing amp in sprite", {
       sprite: spriteName,
