@@ -169,6 +169,7 @@ export async function executeInSprite(
     const settingsFile = "/tmp/amp-settings.json"
     const settings: Record<string, unknown> = {
       "amp.permissions": [{ tool: "*", action: "allow" }],
+      "amp.git.commit.coauthor.enabled": false,
     }
     if (options.systemPrompt) {
       settings["amp.systemPrompt"] = options.systemPrompt
@@ -213,7 +214,17 @@ export async function executeInSprite(
       await spritesClient.exec(spriteName, [
         "gh", "auth", "login", "--with-token",
       ], { env, stdin: githubToken, timeoutMs: 30000 })
-      log.info("GitHub CLI authenticated in sprite", { sprite: spriteName })
+      if (config.gitAuthorName) {
+        await spritesClient.exec(spriteName, [
+          "git", "config", "--global", "user.name", config.gitAuthorName,
+        ], { timeoutMs: 10000 })
+      }
+      if (config.gitAuthorEmail) {
+        await spritesClient.exec(spriteName, [
+          "git", "config", "--global", "user.email", config.gitAuthorEmail,
+        ], { timeoutMs: 10000 })
+      }
+      log.info("GitHub CLI and git identity configured in sprite", { sprite: spriteName })
     }
 
     log.info("Executing amp in sprite", {
