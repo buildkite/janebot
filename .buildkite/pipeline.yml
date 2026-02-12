@@ -1,19 +1,30 @@
 agents:
   queue: hosted
 
+cache:
+  paths:
+    - ".buildkite-cache/mise/data"
+    - ".buildkite-cache/mise/cache"
+    - ".buildkite-cache/mise/state"
+  size: "20g"
+  name: "mise-cache"
+
 env:
   MISE_YES: "1"
   MISE_TRUSTED_CONFIG_PATHS: /buildkite/builds
+  MISE_DATA_DIR: ".buildkite-cache/mise/data"
+  MISE_CACHE_DIR: ".buildkite-cache/mise/cache"
+  MISE_STATE_DIR: ".buildkite-cache/mise/state"
 
 steps:
   - label: ":typescript: Typecheck"
-    command: mise exec node -- pnpm install && mise exec node -- pnpm typecheck
+    command: pnpm install && pnpm typecheck
 
   - label: ":test_tube: Test"
-    command: mise exec node -- pnpm install && mise exec node -- pnpm test
+    command: pnpm install && pnpm test
 
   - label: ":package: Build"
-    command: mise exec node -- pnpm install && mise exec node -- pnpm build
+    command: pnpm install && pnpm build
 
   - wait
 
@@ -22,7 +33,7 @@ steps:
 
   - label: ":fly: Deploy Staging"
     if: build.pull_request.id != null
-    command: mise exec -- flyctl deploy --config fly.staging.toml --remote-only
+    command: flyctl deploy --config fly.staging.toml --remote-only
     secrets:
       - FLY_API_TOKEN_STAGING
 
@@ -30,6 +41,6 @@ steps:
 
   - label: ":fly: Deploy Production"
     branches: main
-    command: mise exec -- flyctl deploy --config fly.toml --remote-only
+    command: flyctl deploy --config fly.toml --remote-only
     secrets:
       - FLY_API_TOKEN_PRODUCTION
