@@ -5,9 +5,21 @@ echo "--- :gear: Installing mise"
 curl -sSf https://mise.run | sh
 export PATH="$HOME/.local/bin:$PATH"
 
-export MISE_DATA_DIR="${MISE_DATA_DIR:-.buildkite-cache/mise/data}"
-export MISE_CACHE_DIR="${MISE_CACHE_DIR:-.buildkite-cache/mise/cache}"
-export MISE_STATE_DIR="${MISE_STATE_DIR:-.buildkite-cache/mise/state}"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+to_absolute() {
+  local path="$1"
+  if [[ "$path" = /* ]]; then
+    printf '%s\n' "$path"
+  else
+    printf '%s/%s\n' "$REPO_ROOT" "$path"
+  fi
+}
+
+MISE_DATA_DIR="$(to_absolute "${MISE_DATA_DIR:-.buildkite-cache/mise/data}")"
+MISE_CACHE_DIR="$(to_absolute "${MISE_CACHE_DIR:-.buildkite-cache/mise/cache}")"
+MISE_STATE_DIR="$(to_absolute "${MISE_STATE_DIR:-.buildkite-cache/mise/state}")"
+
+export MISE_DATA_DIR MISE_CACHE_DIR MISE_STATE_DIR
 
 mkdir -p "$MISE_DATA_DIR" "$MISE_CACHE_DIR" "$MISE_STATE_DIR"
 

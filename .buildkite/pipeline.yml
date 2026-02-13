@@ -12,9 +12,6 @@ cache:
 env:
   MISE_YES: "1"
   MISE_TRUSTED_CONFIG_PATHS: /buildkite/builds
-  MISE_DATA_DIR: ".buildkite-cache/mise/data"
-  MISE_CACHE_DIR: ".buildkite-cache/mise/cache"
-  MISE_STATE_DIR: ".buildkite-cache/mise/state"
 
 steps:
   - label: ":typescript: Typecheck"
