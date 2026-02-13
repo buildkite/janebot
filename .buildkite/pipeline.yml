@@ -3,9 +3,9 @@ agents:
 
 cache:
   paths:
-    - ".buildkite-cache/mise/data"
-    - ".buildkite-cache/mise/cache"
-    - ".buildkite-cache/mise/state"
+    - "~/.local/share/mise"
+    - "~/.cache/mise"
+    - "~/.local/state/mise"
   size: "20g"
   name: "mise-cache"
 
